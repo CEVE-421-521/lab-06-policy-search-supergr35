@@ -1,6 +1,6 @@
 ---
 title: "Lab 6: Policy Search"
-author: "Your Name (netID)"
+author: "Grant Parajuli (gap6)"
 jupyter: julia-1.10
 date: 2024-03-01
 week: 7
@@ -11,18 +11,18 @@ format:
 
     # YOU DO NOT NEED BOTH PDF AND DOCX.
     # COMMENT OR DELETE THE ONE YOU DON'T WANT TO USE.
-    pdf:
-        documentclass: article
-        fontsize: 11pt
-        geometry:
-            - margin=1in  
-        number-sections: true
-        code-line-numbers: true
-    #docx: 
-    #    toc: true
-    #    fig-format: png
-    #    number-sections: true
-    #    code-line-numbers: true
+    # pdf:
+    #     documentclass: article
+    #     fontsize: 11pt
+    #     geometry:
+    #         - margin=1in  
+    #     number-sections: true
+    #     code-line-numbers: true
+    docx: 
+       toc: true
+       fig-format: png
+       number-sections: true
+       code-line-numbers: true
 
 date-format: "ddd., MMM. D"
 
@@ -50,8 +50,83 @@ using Unitful
 Plots.default(; margin=5Plots.mm)
 ```
 
+# Setup
 ```{julia}
-function objective_function(a::AbstractFloat)
-    return true # PLACEHOLDER
+Random.seed!(2024)
+
+#| output: false
+slr_scenarios = let
+    df = CSV.read("data/slr_oddo.csv", DataFrame)
+    [Oddo17SLR(a, b, c, tstar, cstar) for (a, b, c, tstar, cstar) in eachrow(df)]
+end
+
+house = let
+    haz_fl_dept = CSV.read("data/haz_fl_dept.csv", DataFrame) # read in the file
+    desc = "Cafeteria Restaurant, structure"
+    row = @rsubset(haz_fl_dept, :Description == desc)[1, :] # depth damage curve for restaurant structure
+    area = 1200u"ft^2" # rough estimate. They have a ballroom that can have 100 guests (usually need 6x as much square footage for the space required) then I'll assume the rest of kitchen space and dining area is about double that (might be bigger or smaller)
+    height_above_gauge = 9u"ft" # should be 9.3 but got weird float error
+    House(
+        row;
+        area=area,
+        height_above_gauge=height_above_gauge,
+        value_usd=1_200_000
+    )
+end
+
+p = ModelParams(; house=house, years=2024:2083)
+
+function draw_surge_distribution()
+    μ = rand(Normal(5, 1))
+    σ = rand(Exponential(1.5))
+    ξ = rand(Normal(0.1, 0.05))
+    return GeneralizedExtremeValue(μ, σ, ξ)
+end
+function draw_discount_rate()
+    return 0.0
+end
+
+N_SOW = 100_000
+sows = [
+    SOW(rand(slr_scenarios), draw_surge_distribution(), draw_discount_rate()) for
+    _ in 1:N_SOW
+] # for 10 SOWs
+
+# pick 1st 10 SOWs from samples initially
+N_SOW_opt = [sows[i] for i in 1:10000];
+```
+
+```{julia}
+function objective_function(a)
+    a = a[1,1]
+    action = Action(a)
+    costs = [run_sim(action, N_SOW_opt[i], p) for i in 1:length(N_SOW_opt)]
+    return -1*sum(costs)
 end
 ```
+
+# Optimization
+```{julia}
+options = Options(; time_limit=30.0)
+algorithm = ECA(; options=options)
+bounds = boxconstraints(; lb=0.0, ub=14.0)
+optimize(objective_function, bounds, algorithm)
+```
+
+Plot the objective function to verify this solution.
+```{julia}
+x = 0:14
+plot(
+    x,
+    objective_function.(x),
+    xlabel="Elevation height",
+    ylabel="NPV"
+)
+```
+
+# End questions
+The decision variable here was the height of elevating our house, including 0ft, meaning no elevation at all. The objective function assigned a net present value based on our action of the height we elevated by. The states of the world which we optimize include different discount rates, sea level rise scenarios, and storm surge distributions.
+
+The validity of this assumption is a debate on the fundamentals of this analysis. We don't have a true distribution of SOWs. We can create models for this with MCMC analysis, but this causes our dimensionality to blow up (calculating expected values for 1000s of SOWs and 1000s of distribution parameters). Thus, for an exploratory modeling approach, we can assume that we've come up with something that is a decent representation of the world.
+
+We assume for a 50 year period that all of these values will remain the same, while there may be inter-annual variability within this timeframe of parameters such as the discount rate, or even sea level rise if we reached  climate tipping point/reverse some climate change. In truth, these things are hard to model, and it's often a valid choice to not include them since it's hard to quantify these sources of uncertainty.

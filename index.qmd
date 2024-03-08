@@ -158,7 +158,7 @@ We can also time how long they take using the `@time` macro (which is actually n
 a = Action(3.0u"ft")
 sow = first(sows)
 _ = run_sim(a, sow, p)
-@time run_sim(a, sow, p)
+# @time run_sim(a, sow, p)
 ```
 
 This is much faster than the old method, but gives us the same result
@@ -204,7 +204,7 @@ Let's minimize it with $D=10$.
 We need to define bounds of the optimization, which constrains the search space for the decisino variable.
 
 ```{julia}
-D = 10
+D = 25
 bounds = boxconstraints(; lb=-5ones(D), ub=5ones(D))
 ```
 
@@ -250,14 +250,14 @@ This will make our results more reproducible.
 We can then vary the seed to see how sensitive our results are to the random seed.
 
 ```{julia}
-Random.seed!(918)
+Random.seed!(965)
 result = optimize(f, bounds, algorithm)
 ```
 
 and we can check if we get a different result in the next iteration
 
 ```{julia}
-Random.seed!(952)
+# Random.seed!(2000)
 result = optimize(f, bounds, algorithm)
 ```
 
